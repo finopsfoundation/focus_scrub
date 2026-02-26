@@ -485,6 +485,98 @@ class ResourceIdHandler:
 
 
 # ---------------------------------------------------------------------------
+# Tags handler
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TagsHandler:
+    """Scrubs Tags column by scrambling values while preserving keys.
+
+    Handles different tag formats:
+    - AWS: List of tuples [('key1', 'value1'), ('key2', 'value2')]
+    - Azure/OCI: JSON string {"key1":"value1","key2":"value2"}
+    """
+
+    mapping_engine: MappingEngine
+    _char_map: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _column_name: str = field(default="", init=False, repr=False)
+    _collector: MappingCollector | None = field(default=None, init=False, repr=False)
+
+    def attach_collector(self, column_name: str, collector: MappingCollector) -> None:
+        self._column_name = column_name
+        self._collector = collector
+
+    def _get_char_mapping(self, char: str) -> str:
+        """Get or create a random character mapping."""
+        if char not in self._char_map:
+            import random
+            import string
+
+            # Map to same character class
+            if char.isupper():
+                self._char_map[char] = random.choice(string.ascii_uppercase)
+            elif char.islower():
+                self._char_map[char] = random.choice(string.ascii_lowercase)
+            elif char.isdigit():
+                self._char_map[char] = random.choice(string.digits)
+            else:
+                # Non-alphanumeric characters stay the same
+                self._char_map[char] = char
+
+        return self._char_map[char]
+
+    def _scramble_string(self, value: str) -> str:
+        """Scramble a string by mapping each alphanumeric character."""
+        return "".join(self._get_char_mapping(c) for c in value)
+
+    def scrub(self, value: object) -> object:
+        if pd.isna(value):
+            return value
+
+        original = str(value).strip()
+
+        # Handle empty lists/dicts
+        if original in ("[]", "{}", ""):
+            return value
+
+        # Try to detect format and parse
+        import ast
+        import json
+
+        try:
+            # AWS format: list of tuples (comes in as string representation from parquet)
+            if original.startswith("["):
+                tags_list = ast.literal_eval(original)
+                if isinstance(tags_list, list):
+                    # Scramble values but keep keys
+                    scrubbed_list = [(key, self._scramble_string(val)) for key, val in tags_list]
+                    replacement = str(scrubbed_list)
+                else:
+                    replacement = original
+            # Azure/OCI format: JSON string
+            elif original.startswith("{"):
+                tags_dict = json.loads(original)
+                # Scramble values but keep keys
+                scrubbed_dict = {
+                    key: self._scramble_string(val) if val else val
+                    for key, val in tags_dict.items()
+                }
+                replacement = json.dumps(scrubbed_dict, separators=(",", ":"))
+            else:
+                # Unknown format, pass through
+                replacement = original
+        except (ValueError, SyntaxError, json.JSONDecodeError):
+            # If parsing fails, pass through unchanged
+            replacement = original
+
+        if self._collector is not None:
+            self._collector.record(self._column_name, original, replacement)
+
+        return replacement
+
+
+# ---------------------------------------------------------------------------
 # Handler config + factories
 # ---------------------------------------------------------------------------
 
@@ -519,12 +611,17 @@ def _build_resource_id_handler(config: HandlerConfig, engine: MappingEngine) -> 
     return ResourceIdHandler(mapping_engine=engine)
 
 
+def _build_tags_handler(config: HandlerConfig, engine: MappingEngine) -> ColumnHandler:
+    return TagsHandler(mapping_engine=engine)
+
+
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
     "DateReformat": _build_date_reformat_handler,
     "AccountId": _build_account_id_handler,
     "StellarName": _build_stellar_name_handler,
     "CommitmentDiscountId": _build_commitment_discount_id_handler,
     "ResourceId": _build_resource_id_handler,
+    "Tags": _build_tags_handler,
 }
 
 # Dataset-specific column mapping.
@@ -542,6 +639,7 @@ DATASET_COLUMN_HANDLER_NAMES: dict[str, dict[str, str]] = {
         "SubAccountName": "StellarName",
         "CommitmentDiscountId": "CommitmentDiscountId",
         "ResourceId": "ResourceId",
+        "Tags": "Tags",
     },
     "ContractCommitment": {
         "ContractCommitmentPeriodStart": "DateReformat",
@@ -553,6 +651,7 @@ DATASET_COLUMN_HANDLER_NAMES: dict[str, dict[str, str]] = {
         "SubAccountId": "AccountId",
         "SubAccountName": "StellarName",
         "CommitmentDiscountId": "CommitmentDiscountId",
+        "Tags": "Tags",
     },
 }
 

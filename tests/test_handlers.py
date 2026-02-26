@@ -9,6 +9,7 @@ from focus_scrub.handlers import (
     CommitmentDiscountIdHandler,
     ResourceIdHandler,
     StellarNameHandler,
+    TagsHandler,
 )
 from focus_scrub.mapping import MappingCollector, MappingEngine
 
@@ -334,3 +335,166 @@ class TestResourceIdHandler:
         assert "ResourceId" in mappings
         assert original in dict(mappings["ResourceId"])
         assert dict(mappings["ResourceId"])[original] == result
+
+
+class TestTagsHandler:
+    """Test the TagsHandler."""
+
+    def test_aws_format_scrubbing(self, mapping_engine: MappingEngine) -> None:
+        """Test scrubbing AWS format tags (list of tuples)."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # AWS format: list of tuples as string
+        tags = "[('env', 'production'), ('team', 'backend'), ('app', 'api-server')]"
+        result = handler.scrub(tags)
+
+        # Should preserve keys
+        assert "env" in result
+        assert "team" in result
+        assert "app" in result
+
+        # Values should be scrambled
+        assert "production" not in result
+        assert "backend" not in result
+        assert "api-server" not in result
+
+        # Should still be valid list format
+        assert result.startswith("[")
+        assert result.endswith("]")
+
+    def test_json_format_scrubbing(self, mapping_engine: MappingEngine) -> None:
+        """Test scrubbing JSON format tags (Azure/OCI)."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # JSON format
+        tags = '{"environment":"staging","owner":"dev-team","cost-center":"engineering-123"}'
+        result = handler.scrub(tags)
+
+        # Should preserve keys
+        assert '"environment"' in result
+        assert '"owner"' in result
+        assert '"cost-center"' in result
+
+        # Values should be scrambled
+        assert "staging" not in result
+        assert "dev-team" not in result
+        assert "engineering-123" not in result
+
+        # Should still be valid JSON
+        assert result.startswith("{")
+        assert result.endswith("}")
+
+    def test_empty_tags(self, mapping_engine: MappingEngine) -> None:
+        """Test handling of empty tags."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # Empty list
+        assert handler.scrub("[]") == "[]"
+
+        # Empty dict
+        assert handler.scrub("{}") == "{}"
+
+        # Empty string
+        assert handler.scrub("") == ""
+
+    def test_consistency_across_scrubs(self, mapping_engine: MappingEngine) -> None:
+        """Test that same tag values scrub consistently."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        test_cases = [
+            "[('env', 'test-environment'), ('region', 'us-west')]",
+            '{"project":"my-project","version":"v1.2.3"}',
+        ]
+
+        for tags in test_cases:
+            result1 = handler.scrub(tags)
+            result2 = handler.scrub(tags)
+            assert result1 == result2, f"Inconsistent scrubbing for {tags}"
+
+    def test_value_consistency_across_tags(self, mapping_engine: MappingEngine) -> None:
+        """Test that same value in different tags maps consistently."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # Same value "production" in different tag structures
+        tags1 = "[('env', 'production'), ('tier', 'web')]"
+        tags2 = "[('environment', 'production'), ('app', 'service')]"
+
+        result1 = handler.scrub(tags1)
+        result2 = handler.scrub(tags2)
+
+        # Extract the scrambled value for "production" from both results
+        # It should be the same in both
+        import ast
+
+        list1 = ast.literal_eval(result1)
+        list2 = ast.literal_eval(result2)
+
+        prod_value1 = next(val for key, val in list1 if key == "env")
+        prod_value2 = next(val for key, val in list2 if key == "environment")
+
+        assert prod_value1 == prod_value2, "Same value should scramble consistently"
+
+    def test_preserves_key_structure(self, mapping_engine: MappingEngine) -> None:
+        """Test that keys with special characters are preserved."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # Keys with dots, hyphens, etc.
+        tags = '{"kubernetes.io/name":"my-service","aws:cloudformation:stack":"prod-stack"}'
+        result = handler.scrub(tags)
+
+        # Keys should be preserved exactly
+        assert "kubernetes.io/name" in result
+        assert "aws:cloudformation:stack" in result
+
+        # Values should be scrambled
+        assert "my-service" not in result
+        assert "prod-stack" not in result
+
+    def test_empty_values_preserved(self, mapping_engine: MappingEngine) -> None:
+        """Test that empty tag values are preserved."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        tags = '{"active":"true","description":"","notes":""}'
+        result = handler.scrub(tags)
+
+        # Empty strings should remain empty
+        import json
+
+        result_dict = json.loads(result)
+        assert result_dict["description"] == ""
+        assert result_dict["notes"] == ""
+        assert result_dict["active"] != "true"  # Non-empty should be scrambled
+
+    def test_na_values_passed_through(self, mapping_engine: MappingEngine) -> None:
+        """Test that NA values are passed through unchanged."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        assert pd.isna(handler.scrub(pd.NA))
+        assert pd.isna(handler.scrub(None))
+
+    def test_invalid_format_passed_through(self, mapping_engine: MappingEngine) -> None:
+        """Test that invalid formats are passed through unchanged."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+
+        # Malformed JSON
+        invalid = '{"key": invalid}'
+        assert handler.scrub(invalid) == invalid
+
+        # Malformed list
+        invalid2 = "[('key', 'value'"
+        assert handler.scrub(invalid2) == invalid2
+
+    def test_collector_records_mappings(
+        self, mapping_engine: MappingEngine, mapping_collector: MappingCollector
+    ) -> None:
+        """Test that handler records mappings in collector."""
+        handler = TagsHandler(mapping_engine=mapping_engine)
+        handler.attach_collector("Tags", mapping_collector)
+
+        original = "[('environment', 'testing'), ('owner', 'test-user')]"
+        result = handler.scrub(original)
+
+        mappings = mapping_collector.to_dict()
+        assert "Tags" in mappings
+        assert original in dict(mappings["Tags"])
+        assert dict(mappings["Tags"])[original] == result
