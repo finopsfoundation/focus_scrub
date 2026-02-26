@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 from focus_scrub.handlers import HandlerConfig, get_column_handlers_for_dataset
 from focus_scrub.mapping import MappingCollector
 from focus_scrub.scrub import DataFrameScrub

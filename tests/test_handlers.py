@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 from focus_scrub.handlers import (
     AccountIdHandler,
     CommitmentDiscountIdHandler,
