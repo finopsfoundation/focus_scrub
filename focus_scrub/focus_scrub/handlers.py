@@ -30,8 +30,13 @@ class GeneratorMappingHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         normalized = str(value)
         if normalized not in self.value_map:
@@ -55,8 +60,13 @@ class DateReformatHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         parsed = pd.to_datetime(value, errors="coerce")
         if pd.isna(parsed):
@@ -110,8 +120,13 @@ class AccountIdHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
         replacement = self._scrub_value(original)
@@ -180,8 +195,13 @@ class StellarNameHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
         replacement = self.mapping_engine.map_name(original)
@@ -453,8 +473,13 @@ class ResourceIdHandler:
         return f"{ocid_prefix}.{scrambled_resource_type}.{realm}.{region}.{scrambled_unique_id}"
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
 
@@ -531,12 +556,38 @@ class TagsHandler:
         return "".join(self._get_char_mapping(c) for c in value)
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
+
+        # Handle actual list objects (AWS parquet format)
+        if isinstance(value, list):
+            if not value:  # Empty list
+                return value
+            # Scramble values but keep keys
+            scrubbed_list = [(key, self._scramble_string(val)) for key, val in value]
+            if self._collector is not None:
+                self._collector.record(self._column_name, str(value), str(scrubbed_list))
+            return scrubbed_list
+
+        # Handle dict objects (less common but possible)
+        if isinstance(value, dict):
+            if not value:  # Empty dict
+                return value
+            scrubbed_dict = {
+                key: self._scramble_string(val) if val else val for key, val in value.items()
+            }
+            if self._collector is not None:
+                self._collector.record(self._column_name, str(value), str(scrubbed_dict))
+            return scrubbed_dict
 
         original = str(value).strip()
 
-        # Handle empty lists/dicts
+        # Handle empty lists/dicts as strings
         if original in ("[]", "{}", ""):
             return value
 
@@ -545,7 +596,7 @@ class TagsHandler:
         import json
 
         try:
-            # AWS format: list of tuples (comes in as string representation from parquet)
+            # AWS format: list of tuples (comes in as string representation)
             if original.startswith("["):
                 tags_list = ast.literal_eval(original)
                 if isinstance(tags_list, list):
