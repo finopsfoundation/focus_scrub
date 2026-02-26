@@ -222,6 +222,269 @@ class CommitmentDiscountIdHandler:
 
 
 # ---------------------------------------------------------------------------
+# Resource ID handler
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ResourceIdHandler:
+    """Scrubs resource IDs with pattern matching and character-level scrambling."""
+
+    mapping_engine: MappingEngine
+    _char_map: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _column_name: str = field(default="", init=False, repr=False)
+    _collector: MappingCollector | None = field(default=None, init=False, repr=False)
+
+    # Regex patterns for specific resource types
+    _ARN_PATTERN = re.compile(r"^arn:aws:[^:]+:[^:]*:(\d{12}):")
+    _UUID_PATTERN = re.compile(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
+    )
+    _ACCOUNT_ID_PATTERN = re.compile(r"\d{12}")
+
+    def attach_collector(self, column_name: str, collector: MappingCollector) -> None:
+        self._column_name = column_name
+        self._collector = collector
+
+    def _get_char_mapping(self, char: str) -> str:
+        """Get or create a random character mapping."""
+        if char not in self._char_map:
+            import random
+            import string
+
+            # Map to same character class
+            if char.isupper():
+                self._char_map[char] = random.choice(string.ascii_uppercase)
+            elif char.islower():
+                self._char_map[char] = random.choice(string.ascii_lowercase)
+            elif char.isdigit():
+                self._char_map[char] = random.choice(string.digits)
+            else:
+                # Non-alphanumeric characters stay the same
+                self._char_map[char] = char
+
+        return self._char_map[char]
+
+    def _scramble_string(self, value: str) -> str:
+        """Scramble a string by mapping each alphanumeric character."""
+        return "".join(self._get_char_mapping(c) for c in value)
+
+    def _scrub_arn(self, value: str) -> str:
+        """Handle ARN format by scrubbing embedded account IDs, UUIDs, and resource names."""
+        # ARN format: arn:partition:service:region:account-id:resource-type/resource-id
+        # or: arn:partition:service:region:account-id:resource-id
+
+        parts = value.split(":")
+        if len(parts) < 6:
+            # Not a valid ARN, just scramble the whole thing
+            return self._scramble_string(value)
+
+        # Parts: [arn, partition, service, region, account-id, resource...]
+        # Keep the first 4 parts (arn:partition:service:region) unchanged
+        prefix_parts = parts[:4]
+        account_part = parts[4] if len(parts) > 4 else ""
+        resource_parts = parts[5:] if len(parts) > 5 else []
+
+        # Replace account ID if present
+        if account_part and account_part.isdigit() and len(account_part) == 12:
+            account_part = self.mapping_engine.map_number_id(account_part)
+
+        # Join resource parts back (they were split by ':')
+        resource_string = ":".join(resource_parts) if resource_parts else ""
+
+        # Replace UUIDs in the resource string
+        for match in self._UUID_PATTERN.finditer(resource_string):
+            uuid_val = match.group(0)
+            replacement = self.mapping_engine.map_uuid(uuid_val)
+            resource_string = resource_string.replace(uuid_val, replacement)
+
+        # Scramble resource names and IDs
+        # The first segment before "/" is often resource-type (e.g., "loadbalancer", "log-group")
+        # Subsequent segments are resource IDs/names that should be scrambled
+        if resource_string:
+            # Split by / for hierarchical resources
+            slash_parts = resource_string.split("/")
+
+            # First part might be "resource-type" or "resource-name"
+            # Common AWS resource types to preserve
+            aws_resource_types = {
+                "loadbalancer",
+                "log-group",
+                "task",
+                "cluster",
+                "natgateway",
+                "hostedzone",
+                "table",
+                "function",
+                "distribution",
+                "stream",
+                "security-group",
+                "network-interface",
+                "volume",
+                "snapshot",
+            }
+
+            scrambled_slash_parts = []
+            for i, part in enumerate(slash_parts):
+                # First segment: preserve if it's a known resource type, otherwise scramble
+                if i == 0 and part in aws_resource_types:
+                    scrambled_slash_parts.append(part)
+                # "net" and "app" are load balancer scheme types, preserve them
+                elif part in ["net", "app"]:
+                    scrambled_slash_parts.append(part)
+                else:
+                    # Scramble everything else (resource names and IDs)
+                    scrambled_slash_parts.append(self._scramble_string(part))
+
+            resource_string = "/".join(scrambled_slash_parts)
+
+        # Reconstruct the ARN
+        result_parts = (
+            prefix_parts + [account_part] + ([resource_string] if resource_string else [])
+        )
+        return ":".join(result_parts)
+
+    def _scrub_azure_resource_id(self, value: str) -> str:
+        """Handle Azure Resource ID format.
+
+        Azure format: /subscriptions/{guid}/resourcegroups/{name}/providers/{namespace}/{type}/{name}
+        or shorter: /subscriptions/{guid}/providers/{namespace}/{type}/{name}
+        """
+        # Split by / and process each segment
+        parts = value.split("/")
+        if len(parts) < 3:
+            # Not a valid Azure Resource ID
+            return self._scramble_string(value)
+
+        scrubbed_parts = []
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+
+            # Empty string at start (before first /)
+            if not part:
+                scrubbed_parts.append(part)
+                i += 1
+                continue
+
+            # Preserve Azure structure keywords
+            if part in ["subscriptions", "resourcegroups", "providers"]:
+                scrubbed_parts.append(part)
+                # Next part is the value - check if it's a subscription ID (UUID)
+                if i + 1 < len(parts):
+                    next_part = parts[i + 1]
+                    if part == "subscriptions" and self._UUID_PATTERN.match(next_part):
+                        # Scramble subscription ID (UUID)
+                        scrubbed_parts.append(self.mapping_engine.map_uuid(next_part))
+                        i += 2
+                        continue
+                    elif part in ["resourcegroups", "providers"]:
+                        # Next part after resourcegroups/providers needs special handling
+                        if part == "resourcegroups":
+                            # Resource group name - scramble it
+                            scrubbed_parts.append(self._scramble_string(next_part))
+                            i += 2
+                            continue
+                        else:
+                            # Provider namespace like "microsoft.compute" - preserve
+                            scrubbed_parts.append(next_part)
+                            i += 2
+                            continue
+                i += 1
+            # Preserve Microsoft provider namespaces
+            elif part.startswith("microsoft."):
+                scrubbed_parts.append(part)
+                i += 1
+            # Check if it's a UUID embedded in a resource name
+            elif self._UUID_PATTERN.search(part):
+                # Replace UUIDs within the string
+                scrubbed_part = part
+                for match in self._UUID_PATTERN.finditer(part):
+                    uuid_val = match.group(0)
+                    replacement = self.mapping_engine.map_uuid(uuid_val)
+                    scrubbed_part = scrubbed_part.replace(uuid_val, replacement)
+                # Scramble the non-UUID parts
+                # Split by UUID pattern and scramble text segments
+                scrubbed_parts.append(scrubbed_part)
+                i += 1
+            else:
+                # Resource type or resource name - scramble it
+                scrubbed_parts.append(self._scramble_string(part))
+                i += 1
+
+        return "/".join(scrubbed_parts)
+
+    def _scrub_oci_resource_id(self, value: str) -> str:
+        """Handle OCI OCID format.
+
+        OCI format: ocid1.{resource_type}.{realm}.{region}.{unique_id}
+        or simple service names like: oci_{service_name}
+        """
+        # Handle simple OCI service names (e.g., oci_computeagent, oci_faas)
+        if value.startswith("oci_") and "." not in value:
+            # Just scramble the service name part after oci_
+            parts = value.split("_", 1)
+            if len(parts) == 2:
+                return f"oci_{self._scramble_string(parts[1])}"
+            return value
+
+        # Handle full OCIDs: ocid1.{resource_type}.{realm}.{region}.{unique_id}
+        if not value.startswith("ocid1."):
+            return self._scramble_string(value)
+
+        parts = value.split(".")
+        if len(parts) < 5:
+            # Not a valid OCID, scramble it
+            return self._scramble_string(value)
+
+        # Parts: [ocid1, resource_type, realm, region, unique_id]
+        # Keep ocid1, realm (oc1), and region structure
+        # Scramble resource_type and unique_id
+        ocid_prefix = parts[0]  # "ocid1"
+        resource_type = parts[1]  # e.g., "instance", "bootvolume", "vnic"
+        realm = parts[2]  # e.g., "oc1"
+        region = parts[3]  # e.g., "ap-hyderabad-1"
+        unique_id = ".".join(parts[4:])  # The unique identifier (may contain dots)
+
+        # Scramble resource type and unique ID
+        scrambled_resource_type = self._scramble_string(resource_type)
+        scrambled_unique_id = self._scramble_string(unique_id)
+
+        return f"{ocid_prefix}.{scrambled_resource_type}.{realm}.{region}.{scrambled_unique_id}"
+
+    def scrub(self, value: object) -> object:
+        if pd.isna(value):
+            return value
+
+        original = str(value).strip()
+
+        # Handle OCI OCIDs
+        if original.startswith("ocid1.") or (original.startswith("oci_") and "." not in original):
+            replacement = self._scrub_oci_resource_id(original)
+        # Handle Azure Resource IDs
+        elif original.startswith("/subscriptions/"):
+            replacement = self._scrub_azure_resource_id(original)
+        # Handle AWS ARNs
+        elif original.startswith("arn:"):
+            replacement = self._scrub_arn(original)
+        # Handle instance IDs, ENI IDs, NAT gateway IDs, etc.
+        elif original.startswith(("i-", "eni-", "nat-", "sg-", "subnet-", "vpc-", "vol-")):
+            # Keep the prefix, scramble the rest
+            prefix_end = original.find("-") + 1
+            prefix = original[:prefix_end]
+            suffix = original[prefix_end:]
+            replacement = prefix + self._scramble_string(suffix)
+        else:
+            # Default: scramble the entire value
+            replacement = self._scramble_string(original)
+
+        if self._collector is not None:
+            self._collector.record(self._column_name, original, replacement)
+
+        return replacement
+
+
+# ---------------------------------------------------------------------------
 # Handler config + factories
 # ---------------------------------------------------------------------------
 
@@ -252,11 +515,16 @@ def _build_commitment_discount_id_handler(
     return CommitmentDiscountIdHandler(mapping_engine=engine)
 
 
+def _build_resource_id_handler(config: HandlerConfig, engine: MappingEngine) -> ColumnHandler:
+    return ResourceIdHandler(mapping_engine=engine)
+
+
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
     "DateReformat": _build_date_reformat_handler,
     "AccountId": _build_account_id_handler,
     "StellarName": _build_stellar_name_handler,
     "CommitmentDiscountId": _build_commitment_discount_id_handler,
+    "ResourceId": _build_resource_id_handler,
 }
 
 # Dataset-specific column mapping.
@@ -273,6 +541,7 @@ DATASET_COLUMN_HANDLER_NAMES: dict[str, dict[str, str]] = {
         "SubAccountId": "AccountId",
         "SubAccountName": "StellarName",
         "CommitmentDiscountId": "CommitmentDiscountId",
+        "ResourceId": "ResourceId",
     },
     "ContractCommitment": {
         "ContractCommitmentPeriodStart": "DateReformat",

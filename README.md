@@ -2,6 +2,8 @@
 
 A Python command-line tool for scrubbing sensitive data from FOCUS billing files with consistent, reproducible mappings.
 
+> **⚠️ DISCLAIMER**: This tool provides automated scrubbing of common PII patterns in billing data, but **cannot guarantee complete removal of all personally identifiable information**. The output data should always be reviewed by a human before sharing or publishing to ensure all sensitive information has been properly anonymized. Users are responsible for verifying the scrubbed data meets their security and privacy requirements.
+
 ## Features
 
 ### Data Scrubbing
