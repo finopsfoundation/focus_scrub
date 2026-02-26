@@ -18,7 +18,7 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
   - `ProfileCode`: Maps dash-separated codes preserving structure
 
 ### Consistency Guarantees
-- Same account ID (e.g., `407116685360`) maps to the same value whether it appears:
+- Same account ID (e.g., `658755425446`) maps to the same value whether it appears:
   - As a standalone `SubAccountId`
   - Embedded in a `CommitmentDiscountId` ARN
   - In any other account-related column
@@ -168,10 +168,10 @@ HANDLER_FACTORIES: dict[str, HandlerFactory] = {
    - Names always map to same stellar name
 
 2. **Handlers** decompose complex values and use engine for each component:
-   - ARN `arn:aws:ec2:us-east-1:407116685360:reserved-instances/uuid` →
-   - Account `407116685360` → maps via `engine.map_number_id()`
+   - ARN `arn:aws:ec2:us-east-1:658755425446:reserved-instances/uuid` →
+   - Account `658755425446` → maps via `engine.map_number_id()`
    - UUID → maps via `engine.map_uuid()`
-   - Result: `arn:aws:ec2:us-east-1:716254982240:reserved-instances/new-uuid`
+   - Result: `arn:aws:ec2:us-east-1:752426551655:reserved-instances/new-uuid`
 
 3. **Consistency** is maintained because the engine remembers all mappings:
    - Same input value always produces same output
@@ -182,18 +182,18 @@ HANDLER_FACTORIES: dict[str, HandlerFactory] = {
 
 ### Original Data
 ```
-BillingAccountId: 961082193871
-SubAccountId: 407116685360
-BillingAccountName: The Linux Foundation
-CommitmentDiscountId: arn:aws:ec2:us-east-1:407116685360:reserved-instances/ed12ad8c-...
+BillingAccountId: 658745821254
+SubAccountId: 658755425446
+BillingAccountName: MyBillingAccount
+CommitmentDiscountId: arn:aws:ec2:us-east-1:658755425446:reserved-instances/ed12ad8c-...
 ```
 
 ### Scrubbed Data
 ```
 BillingAccountId: 736035721513
-SubAccountId: 716254982240
+SubAccountId: 752426551655
 BillingAccountName: Nebula Iota
-CommitmentDiscountId: arn:aws:ec2:us-east-1:716254982240:reserved-instances/c741d6b8-...
+CommitmentDiscountId: arn:aws:ec2:us-east-1:752426551655:reserved-instances/c741d6b8-...
 ```
 
-Note: The account ID `407116685360` consistently maps to `716254982240` in both the `SubAccountId` column and within the `CommitmentDiscountId` ARN.
+Note: The account ID `658755425446` consistently maps to `752426551655` in both the `SubAccountId` column and within the `CommitmentDiscountId` ARN.
