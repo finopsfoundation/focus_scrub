@@ -116,6 +116,17 @@ poetry run focus-scrub input/ output/ \
   --output-format csv-gzip
 ```
 
+### Remove Custom Columns
+
+Remove custom columns (starting with `x_` or `oci_`) from the output:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --remove-custom-columns
+```
+
+> **Note**: The FOCUS spec states that custom columns should start with `x_`, but OCI uses `oci_` prefix. Both patterns are recognized and removed when this option is enabled.
+
 ### Complete Example
 
 ```bash

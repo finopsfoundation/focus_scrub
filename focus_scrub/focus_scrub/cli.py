@@ -64,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Optional path to load mappings from a previous run to ensure consistent scrubbing.",
     )
+    parser.add_argument(
+        "--remove-custom-columns",
+        action="store_true",
+        help="Remove custom columns from the output.",
+    )
     return parser
 
 
@@ -78,6 +83,7 @@ def main() -> int:
     date_shift_days: int = args.date_shift_days
     export_mappings: Path | None = args.export_mappings
     load_mappings: Path | None = args.load_mappings
+    remove_custom_columns: bool = args.remove_custom_columns
 
     files = discover_focus_files(input_path)
     if not files:
@@ -100,7 +106,9 @@ def main() -> int:
     column_handlers, mapping_engine = get_column_handlers_for_dataset(
         dataset, config=handler_config, collector=collector, mapping_engine=mapping_engine
     )
-    scrub = DataFrameScrub(column_handlers=column_handlers)
+    scrub = DataFrameScrub(
+        column_handlers=column_handlers, remove_custom_columns=remove_custom_columns
+    )
 
     for input_file in files:
         df = read_focus_file(input_file)
