@@ -31,7 +31,7 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
 
 ### File Format Support
 - **Input formats**: `.csv`, `.csv.gz`, `.parquet`
-- **Output formats**: `csv-gzip`, `parquet`
+- **Output formats**: `csv-gzip`, `parquet`, `sql`
 - Process single files or entire directories
 - Preserves directory structure in output
 
@@ -117,6 +117,64 @@ poetry run focus-scrub input/ output/ \
   --dataset CostAndUsage \
   --output-format csv-gzip
 ```
+
+Available formats:
+- `parquet` (default): Apache Parquet columnar format
+- `csv-gzip`: Compressed CSV files
+- `sql`: SQL INSERT statements for database loading
+
+#### SQL Output Format
+
+The SQL output format generates CREATE TABLE DDL and bulk INSERT statements optimized for database loading:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --output-format sql
+```
+
+**Features:**
+- Generates CREATE TABLE IF NOT EXISTS statement with inferred column types
+- Adds auto-incrementing `id` column as primary key
+- Generates bulk INSERT statements (1000 rows per batch)
+- Automatically derives table name from filename (sanitizes hyphens, spaces, periods → underscores)
+- Properly escapes single quotes in string values
+- Handles NULL values correctly
+- Includes row count in header comments
+
+**Example output:**
+```sql
+-- FOCUS Scrubbed Data
+-- Table: focus_data
+-- Rows: 2500
+
+CREATE TABLE IF NOT EXISTS focus_data (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  BillingAccountId TEXT,
+  BillingAccountName TEXT,
+  Cost DOUBLE PRECISION
+);
+
+INSERT INTO focus_data (BillingAccountId, BillingAccountName, Cost)
+VALUES
+  ('123456789012', 'Nebula Alpha', 100.50),
+  ('987654321098', 'Stellar Beta', 250.75),
+  ...;
+
+INSERT INTO focus_data (BillingAccountId, BillingAccountName, Cost)
+VALUES
+  ...
+```
+
+**Column type mapping:**
+- Integer columns → `BIGINT`
+- Float/Double columns → `DOUBLE PRECISION`
+- Boolean columns → `BOOLEAN`
+- DateTime columns → `TIMESTAMP`
+- Date columns → `DATE`
+- All other types → `TEXT`
+
+**Use case:** Ideal for loading scrubbed data directly into databases (PostgreSQL, MySQL, SQLite, etc.) using standard SQL import tools. The CREATE TABLE statement ensures the table exists before inserting data, and the auto-incrementing primary key provides a unique identifier for each row.
 
 ### Remove Custom Columns
 
