@@ -375,3 +375,79 @@ CommitmentDiscountId: arn:aws:ec2:us-east-1:752426551655:reserved-instances/c741
 ```
 
 Note: The account ID `658755425446` consistently maps to `752426551655` in both the `SubAccountId` column and within the `CommitmentDiscountId` ARN.
+
+## Development
+
+### Running Tests
+
+Run the test suite:
+```bash
+make test
+# or
+poetry run pytest tests/ -v
+```
+
+### Code Coverage
+
+Run tests with coverage report:
+```bash
+make coverage
+```
+
+This will run all tests and display a coverage report in the terminal showing:
+- Overall coverage percentage
+- Coverage by file
+- Missing line numbers
+
+Generate an HTML coverage report:
+```bash
+make coverage-html
+```
+
+This creates an interactive HTML report in `htmlcov/index.html` that you can open in your browser to see detailed line-by-line coverage information.
+
+**Current coverage:** ~89%
+
+### Code Quality
+
+Run all code quality checks:
+```bash
+make check
+```
+
+This runs:
+- Linting (ruff)
+- Format checking (ruff format)
+- Type checking (mypy)
+- Tests with coverage
+
+Format code:
+```bash
+make format
+```
+
+### Pre-commit Hooks
+
+Install pre-commit hooks to automatically run checks before each commit:
+```bash
+make pre-commit-install
+```
+
+Or run manually:
+```bash
+make pre-commit-run
+```
+
+### Clean Up
+
+Remove generated files and caches:
+```bash
+make clean
+```
+
+This removes:
+- Python cache files (`__pycache__`, `.pyc`)
+- Test cache (`.pytest_cache`)
+- Type checking cache (`.mypy_cache`)
+- Linter cache (`.ruff_cache`)
+- Coverage files (`.coverage`, `coverage.xml`, `htmlcov/`)

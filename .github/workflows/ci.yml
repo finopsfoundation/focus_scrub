@@ -32,5 +32,13 @@ jobs:
       - name: Run lint
         run: make lint
 
-      - name: Run tests
-        run: make test
+      - name: Run tests with coverage
+        run: make coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
