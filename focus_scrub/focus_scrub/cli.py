@@ -86,6 +86,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only shift dates, leave all other data unchanged. Useful for re-dating datasets without scrubbing.",
     )
+    parser.add_argument(
+        "--sql-table-name",
+        type=str,
+        default=None,
+        help="Custom table name for SQL output. If not provided, derives from filename.",
+    )
     return parser
 
 
@@ -104,6 +110,7 @@ def main() -> int:
     drop_columns: list[str] = args.drop_columns
     scrub_tag_keys: bool = args.scrub_tag_keys
     dates_only: bool = args.dates_only
+    sql_table_name: str | None = args.sql_table_name
 
     files = discover_focus_files(input_path)
     if not files:
@@ -143,7 +150,7 @@ def main() -> int:
             output_root=output_path,
             output_format=output_format,
         )
-        write_focus_file(scrubbed, destination, output_format)
+        write_focus_file(scrubbed, destination, output_format, sql_table_name=sql_table_name)
         print(f"Processed: {input_file} -> {destination}")
 
     print(f"Done. Processed {len(files)} file(s) for dataset '{dataset}'.")

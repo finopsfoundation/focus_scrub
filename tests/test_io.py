@@ -237,3 +237,26 @@ class TestSqlOutput:
             create_pos = sql_content.find("CREATE TABLE")
             insert_pos = sql_content.find("INSERT INTO")
             assert create_pos < insert_pos
+
+    def test_sql_output_custom_table_name(self) -> None:
+        """Test SQL output with custom table name."""
+        df = pd.DataFrame(
+            {
+                "AccountId": ["123", "456"],
+                "Cost": [100.50, 250.75],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "some-file.name.sql"
+            write_focus_file(df, output_file, FileFormat.SQL, sql_table_name="custom_focus_table")
+
+            sql_content = output_file.read_text()
+
+            # Verify custom table name is used
+            assert "CREATE TABLE IF NOT EXISTS custom_focus_table" in sql_content
+            assert "INSERT INTO custom_focus_table" in sql_content
+            assert "-- Table: custom_focus_table" in sql_content
+
+            # Verify filename-based name is NOT used
+            assert "some_file_name" not in sql_content

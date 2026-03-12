@@ -176,6 +176,30 @@ VALUES
 
 **Use case:** Ideal for loading scrubbed data directly into databases (PostgreSQL, MySQL, SQLite, etc.) using standard SQL import tools. The CREATE TABLE statement ensures the table exists before inserting data, and the auto-incrementing primary key provides a unique identifier for each row.
 
+##### Custom Table Name
+
+By default, the SQL table name is derived from the input filename. You can specify a custom table name using the `--sql-table-name` option:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --output-format sql \
+  --sql-table-name my_billing_data
+```
+
+This will generate SQL with your custom table name:
+```sql
+CREATE TABLE IF NOT EXISTS my_billing_data (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ...
+);
+
+INSERT INTO my_billing_data (...)
+VALUES ...;
+```
+
+**Note:** The custom table name is still sanitized (hyphens, spaces, periods → underscores) to ensure SQL compatibility.
+
 ### Remove Custom Columns
 
 Remove custom columns (starting with `x_` or `oci_`) from the output:

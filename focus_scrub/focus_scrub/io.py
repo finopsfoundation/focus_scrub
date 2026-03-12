@@ -62,7 +62,12 @@ def output_path_for_file(
     return output_root / f"{base}.parquet"
 
 
-def write_focus_file(df: pd.DataFrame, output_file: Path, output_format: FileFormat) -> None:
+def write_focus_file(
+    df: pd.DataFrame,
+    output_file: Path,
+    output_format: FileFormat,
+    sql_table_name: str | None = None,
+) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     if output_format == FileFormat.CSV_GZIP:
@@ -74,7 +79,7 @@ def write_focus_file(df: pd.DataFrame, output_file: Path, output_format: FileFor
         return
 
     if output_format == FileFormat.SQL:
-        _write_sql_insert_statements(df, output_file)
+        _write_sql_insert_statements(df, output_file, sql_table_name)
         return
 
     raise ValueError(f"Unsupported output format: {output_format}")
@@ -112,14 +117,19 @@ def _pandas_dtype_to_sql_type(dtype: str) -> str:
         return "TEXT"
 
 
-def _write_sql_insert_statements(df: pd.DataFrame, output_file: Path) -> None:
+def _write_sql_insert_statements(
+    df: pd.DataFrame, output_file: Path, sql_table_name: str | None = None
+) -> None:
     """Write DataFrame as SQL CREATE TABLE and INSERT statements.
 
     Generates CREATE TABLE DDL and bulk INSERT statements with proper SQL escaping.
-    Table name is derived from the output filename.
+    Table name is derived from the output filename unless sql_table_name is provided.
     """
-    # Derive table name from filename (without extension)
-    table_name = output_file.stem
+    # Use custom table name if provided, otherwise derive from filename
+    if sql_table_name:
+        table_name = sql_table_name
+    else:
+        table_name = output_file.stem
     # Sanitize table name (replace hyphens/spaces/periods with underscores)
     table_name = table_name.replace("-", "_").replace(" ", "_").replace(".", "_")
 
