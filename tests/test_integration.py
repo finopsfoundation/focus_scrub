@@ -144,3 +144,159 @@ class TestIntegration:
 
         # Verify that the same account ID gets the same mapping
         assert result1["BillingAccountId"][0] == result2["BillingAccountId"][0]
+
+    def test_drop_columns_defaults_to_x_discounts(self) -> None:
+        """Test that x_Discounts is dropped by default."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        # Not specifying drop_columns - should use default
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is dropped by default
+        assert "x_Discounts" not in result.columns
+        # Verify other custom columns remain
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_columns_can_be_overridden_to_empty(self) -> None:
+        """Test that drop_columns can be set to empty list to keep x_Discounts."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        # Explicitly pass empty list to keep all columns
+        scrub = DataFrameScrub(column_handlers=column_handlers, drop_columns=[])
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is kept when explicitly set to empty
+        assert "x_Discounts" in result.columns
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_specific_columns(self) -> None:
+        """Test dropping specific columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers, drop_columns=["x_Discounts"])
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is dropped but x_CustomField remains
+        assert "x_Discounts" not in result.columns
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_multiple_columns(self) -> None:
+        """Test dropping multiple specific columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "x_AnotherField": ["another1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            drop_columns=["x_Discounts", "x_AnotherField"],
+        )
+
+        result = scrub.scrub(df)
+
+        # Verify specified columns are dropped
+        assert "x_Discounts" not in result.columns
+        assert "x_AnotherField" not in result.columns
+        # Verify other columns remain
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_columns_with_remove_custom_columns(self) -> None:
+        """Test that drop_columns works alongside remove_custom_columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "oci_tenancyId": ["tenancy1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            remove_custom_columns=True,
+            drop_columns=[
+                "x_Discounts"
+            ],  # This should be redundant since remove_custom_columns removes it anyway
+        )
+
+        result = scrub.scrub(df)
+
+        # Verify all custom columns are removed
+        assert "x_Discounts" not in result.columns
+        assert "x_CustomField" not in result.columns
+        assert "oci_tenancyId" not in result.columns
+        # Verify standard columns remain
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_nonexistent_column(self) -> None:
+        """Test that dropping a non-existent column doesn't cause errors."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            drop_columns=["x_NonExistent", "x_AlsoNotThere"],
+        )
+
+        result = scrub.scrub(df)
+
+        # Should complete without error
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+        assert len(result.columns) == 2

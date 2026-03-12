@@ -69,6 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Remove custom columns from the output.",
     )
+    parser.add_argument(
+        "--drop-columns",
+        nargs="*",
+        default=["x_Discounts"],
+        metavar="COLUMN",
+        help="Specific column names to drop from the output (default: x_Discounts). Pass empty list to keep all columns.",
+    )
     return parser
 
 
@@ -84,6 +91,7 @@ def main() -> int:
     export_mappings: Path | None = args.export_mappings
     load_mappings: Path | None = args.load_mappings
     remove_custom_columns: bool = args.remove_custom_columns
+    drop_columns: list[str] = args.drop_columns
 
     files = discover_focus_files(input_path)
     if not files:
@@ -107,7 +115,9 @@ def main() -> int:
         dataset, config=handler_config, collector=collector, mapping_engine=mapping_engine
     )
     scrub = DataFrameScrub(
-        column_handlers=column_handlers, remove_custom_columns=remove_custom_columns
+        column_handlers=column_handlers,
+        remove_custom_columns=remove_custom_columns,
+        drop_columns=drop_columns,
     )
 
     for input_file in files:

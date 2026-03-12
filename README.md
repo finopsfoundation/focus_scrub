@@ -127,6 +127,39 @@ poetry run focus-scrub input/ output/ \
 
 > **Note**: The FOCUS spec states that custom columns should start with `x_`, but OCI uses `oci_` prefix. Both patterns are recognized and removed when this option is enabled.
 
+### Drop Specific Columns
+
+By default, the `x_Discounts` column is automatically dropped from the output. This is a known data generator custom column that is commonly removed.
+
+To keep `x_Discounts`, explicitly pass an empty list:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns
+```
+
+To drop additional specific columns:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns x_Discounts x_CustomField x_AnotherField
+```
+
+This is useful when you want to remove specific custom columns but keep others. For example, to drop only `x_CustomField` while keeping `x_Discounts`:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns x_CustomField
+```
+
+You can combine `--drop-columns` with `--remove-custom-columns`, though the latter will remove all custom columns anyway:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --remove-custom-columns \
+  --drop-columns x_Discounts  # Redundant but harmless
+```
+
 ### Complete Example
 
 ```bash
