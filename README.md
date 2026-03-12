@@ -14,6 +14,20 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
 - **Tag Scrubbing**: Scrambles tag values while preserving keys by default; optionally scrambles keys as well
 - **Resource ID Scrubbing**: Handles AWS ARNs, Azure Resource IDs, and OCI OCIDs with intelligent pattern-based scrambling
 
+#### What is NOT Scrubbed
+
+**Metric columns (costs, quantities, usage amounts) are intentionally left unchanged.** This is a deliberate design decision for the following reasons:
+
+1. **Interdependency Complexity**: Metric columns are mathematically related (e.g., `BilledCost = ConsumedQuantity × UnitPrice`). Adjusting one metric would require proportional adjustments to maintain consistency, which is extremely complex across all FOCUS metric relationships.
+
+2. **Reversibility Risk**: Any systematic scaling of metrics could potentially be reversed by correlating the scrubbed dataset with publicly available pricing data, providing a false sense of security without actual data protection.
+
+3. **Data Integrity**: Altering metrics would break the mathematical consistency of the dataset, making it unsuitable for realistic testing, validation, or development scenarios where accurate cost calculations are required.
+
+4. **Limited PII Value**: Unlike account IDs and names, aggregate cost and usage metrics typically don't constitute personally identifiable information on their own.
+
+**Recommendation**: If metric values are sensitive in your use case, consider using a representative subset of your data, applying additional manual obfuscation, or generating synthetic data with realistic distributions rather than relying on automated metric scrubbing.
+
 ### Mapping Engine
 - **Component-Level Mappings**: Centralized mapping engine ensures consistency across all columns
   - `NumberId`: Maps numeric IDs (e.g., 12-digit AWS account IDs)
@@ -407,6 +421,8 @@ make coverage-html
 This creates an interactive HTML report in `htmlcov/index.html` that you can open in your browser to see detailed line-by-line coverage information.
 
 **Current coverage:** ~89%
+
+**Coverage requirement:** The test suite enforces a minimum coverage threshold of **80%**. Tests will fail if coverage drops below this threshold, both locally and in CI/CD pipelines. This ensures code quality is maintained as the project evolves.
 
 ### Code Quality
 
