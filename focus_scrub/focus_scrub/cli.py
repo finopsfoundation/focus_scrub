@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="COLUMN",
         help="Specific column names to drop from the output (default: x_Discounts). Pass empty list to keep all columns.",
     )
+    parser.add_argument(
+        "--scrub-tag-keys",
+        action="store_true",
+        help="Scrub tag keys in addition to tag values (default: False, only scrubs values).",
+    )
     return parser
 
 
@@ -92,13 +97,14 @@ def main() -> int:
     load_mappings: Path | None = args.load_mappings
     remove_custom_columns: bool = args.remove_custom_columns
     drop_columns: list[str] = args.drop_columns
+    scrub_tag_keys: bool = args.scrub_tag_keys
 
     files = discover_focus_files(input_path)
     if not files:
         parser.error("No supported input files found (.csv, .csv.gz, .parquet).")
 
     collector = MappingCollector() if export_mappings is not None else None
-    handler_config = HandlerConfig(date_shift_days=date_shift_days)
+    handler_config = HandlerConfig(date_shift_days=date_shift_days, scrub_tag_keys=scrub_tag_keys)
 
     # Load existing mappings if provided
     mapping_engine = None

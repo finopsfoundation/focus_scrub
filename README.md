@@ -11,6 +11,8 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
 - **Name Anonymization**: Replaces account names with stellar-themed generated names
 - **Date Shifting**: Shifts date/datetime values by a configurable number of days
 - **Commitment Discount IDs**: Intelligently scrubs complex IDs containing embedded account numbers and UUIDs
+- **Tag Scrubbing**: Scrambles tag values while preserving keys by default; optionally scrambles keys as well
+- **Resource ID Scrubbing**: Handles AWS ARNs, Azure Resource IDs, and OCI OCIDs with intelligent pattern-based scrambling
 
 ### Mapping Engine
 - **Component-Level Mappings**: Centralized mapping engine ensures consistency across all columns
@@ -159,6 +161,29 @@ poetry run focus-scrub input/ output/ \
   --remove-custom-columns \
   --drop-columns x_Discounts  # Redundant but harmless
 ```
+
+### Scrub Tag Keys
+
+By default, the Tags column handler preserves tag keys and only scrubs the values. To also scrub the tag keys:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --scrub-tag-keys
+```
+
+**Default behavior (preserve keys):**
+```
+Input:  {"environment":"production","owner":"team-alpha"}
+Output: {"environment":"qspcvdujpo","owner":"ufbn-bmqib"}
+```
+
+**With --scrub-tag-keys (scrub both keys and values):**
+```
+Input:  {"environment":"production","owner":"team-alpha"}
+Output: {"fowjsponfou":"qspcvdujpo","pxofs":"ufbn-bmqib"}
+```
+
+> **Note**: When `--scrub-tag-keys` is enabled, the same key will consistently map to the same scrambled key across all tags and all rows, ensuring referential integrity is maintained.
 
 ### Complete Example
 

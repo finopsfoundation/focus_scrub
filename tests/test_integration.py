@@ -300,3 +300,40 @@ class TestIntegration:
         assert "BillingAccountId" in result.columns
         assert "Tags" in result.columns
         assert len(result.columns) == 2
+
+    def test_scrub_tag_keys_config_option(self) -> None:
+        """Test that scrub_tag_keys config option works through the handler."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "Tags": ['{"environment":"production","owner":"team-alpha"}'],
+            }
+        )
+
+        # Default behavior: preserve keys
+        config_default = HandlerConfig(date_shift_days=0, scrub_tag_keys=False)
+        column_handlers_default, _ = get_column_handlers_for_dataset(
+            "CostAndUsage", config=config_default
+        )
+        scrub_default = DataFrameScrub(column_handlers=column_handlers_default)
+        result_default = scrub_default.scrub(df)
+
+        import json
+
+        result_tags_default = json.loads(result_default["Tags"][0])
+        assert "environment" in result_tags_default  # Keys preserved
+        assert "owner" in result_tags_default
+        assert result_tags_default["environment"] != "production"  # Values scrambled
+
+        # With scrub_tag_keys: scramble keys too
+        config_scrub = HandlerConfig(date_shift_days=0, scrub_tag_keys=True)
+        column_handlers_scrub, _ = get_column_handlers_for_dataset(
+            "CostAndUsage", config=config_scrub
+        )
+        scrub_keys = DataFrameScrub(column_handlers=column_handlers_scrub)
+        result_scrub = scrub_keys.scrub(df)
+
+        result_tags_scrub = json.loads(result_scrub["Tags"][0])
+        assert "environment" not in result_tags_scrub  # Keys scrambled
+        assert "owner" not in result_tags_scrub
+        assert "production" not in result_tags_scrub.values()  # Values also scrambled

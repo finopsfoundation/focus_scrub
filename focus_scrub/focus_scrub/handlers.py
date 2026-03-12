@@ -524,6 +524,7 @@ class TagsHandler:
     """
 
     mapping_engine: MappingEngine
+    scrub_tag_keys: bool = False
     _char_map: dict[str, str] = field(default_factory=dict, init=False, repr=False)
     _column_name: str = field(default="", init=False, repr=False)
     _collector: MappingCollector | None = field(default=None, init=False, repr=False)
@@ -568,8 +569,13 @@ class TagsHandler:
         if isinstance(value, list):
             if not value:  # Empty list
                 return value
-            # Scramble values but keep keys
-            scrubbed_list = [(key, self._scramble_string(val)) for key, val in value]
+            # Scramble values and optionally keys
+            if self.scrub_tag_keys:
+                scrubbed_list = [
+                    (self._scramble_string(key), self._scramble_string(val)) for key, val in value
+                ]
+            else:
+                scrubbed_list = [(key, self._scramble_string(val)) for key, val in value]
             if self._collector is not None:
                 self._collector.record(self._column_name, str(value), str(scrubbed_list))
             return scrubbed_list
@@ -578,9 +584,15 @@ class TagsHandler:
         if isinstance(value, dict):
             if not value:  # Empty dict
                 return value
-            scrubbed_dict = {
-                key: self._scramble_string(val) if val else val for key, val in value.items()
-            }
+            if self.scrub_tag_keys:
+                scrubbed_dict = {
+                    self._scramble_string(key): self._scramble_string(val) if val else val
+                    for key, val in value.items()
+                }
+            else:
+                scrubbed_dict = {
+                    key: self._scramble_string(val) if val else val for key, val in value.items()
+                }
             if self._collector is not None:
                 self._collector.record(self._column_name, str(value), str(scrubbed_dict))
             return scrubbed_dict
@@ -600,19 +612,33 @@ class TagsHandler:
             if original.startswith("["):
                 tags_list = ast.literal_eval(original)
                 if isinstance(tags_list, list):
-                    # Scramble values but keep keys
-                    scrubbed_list = [(key, self._scramble_string(val)) for key, val in tags_list]
+                    # Scramble values and optionally keys
+                    if self.scrub_tag_keys:
+                        scrubbed_list = [
+                            (self._scramble_string(key), self._scramble_string(val))
+                            for key, val in tags_list
+                        ]
+                    else:
+                        scrubbed_list = [
+                            (key, self._scramble_string(val)) for key, val in tags_list
+                        ]
                     replacement = str(scrubbed_list)
                 else:
                     replacement = original
             # Azure/OCI format: JSON string
             elif original.startswith("{"):
                 tags_dict = json.loads(original)
-                # Scramble values but keep keys
-                scrubbed_dict = {
-                    key: self._scramble_string(val) if val else val
-                    for key, val in tags_dict.items()
-                }
+                # Scramble values and optionally keys
+                if self.scrub_tag_keys:
+                    scrubbed_dict = {
+                        self._scramble_string(key): self._scramble_string(val) if val else val
+                        for key, val in tags_dict.items()
+                    }
+                else:
+                    scrubbed_dict = {
+                        key: self._scramble_string(val) if val else val
+                        for key, val in tags_dict.items()
+                    }
                 replacement = json.dumps(scrubbed_dict, separators=(",", ":"))
             else:
                 # Unknown format, pass through
@@ -635,6 +661,7 @@ class TagsHandler:
 @dataclass(frozen=True)
 class HandlerConfig:
     date_shift_days: int = 0
+    scrub_tag_keys: bool = False
 
 
 HandlerFactory = Callable[[HandlerConfig, MappingEngine], ColumnHandler]
@@ -663,7 +690,7 @@ def _build_resource_id_handler(config: HandlerConfig, engine: MappingEngine) -> 
 
 
 def _build_tags_handler(config: HandlerConfig, engine: MappingEngine) -> ColumnHandler:
-    return TagsHandler(mapping_engine=engine)
+    return TagsHandler(mapping_engine=engine, scrub_tag_keys=config.scrub_tag_keys)
 
 
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
