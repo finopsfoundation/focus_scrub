@@ -662,6 +662,7 @@ class TagsHandler:
 class HandlerConfig:
     date_shift_days: int = 0
     scrub_tag_keys: bool = False
+    dates_only: bool = False
 
 
 HandlerFactory = Callable[[HandlerConfig, MappingEngine], ColumnHandler]
@@ -758,6 +759,10 @@ def get_column_handlers_for_dataset(
         mapping_engine = MappingEngine()
 
     for column_name, handler_name in column_to_handler_name.items():
+        # If dates_only mode, skip non-date handlers
+        if config.dates_only and handler_name != "DateReformat":
+            continue
+
         if handler_name not in HANDLER_FACTORIES:
             raise ValueError(
                 f"Dataset '{dataset_name}' references unknown handler "

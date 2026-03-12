@@ -185,6 +185,31 @@ Output: {"fowjsponfou":"qspcvdujpo","pxofs":"ufbn-bmqib"}
 
 > **Note**: When `--scrub-tag-keys` is enabled, the same key will consistently map to the same scrambled key across all tags and all rows, ensuring referential integrity is maintained.
 
+### Dates Only Mode
+
+To only shift dates without scrubbing any other sensitive data, use the `--dates-only` option. This is useful for re-dating FOCUS datasets for testing or analysis while preserving the original data:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --date-shift-days 30 \
+  --dates-only
+```
+
+**What happens:**
+- Date columns are shifted by the specified number of days
+- All other columns (account IDs, names, tags, etc.) remain unchanged
+- Useful for time-based testing without data scrubbing
+
+**Example use case:**
+```bash
+# Re-date a dataset to current month for demo purposes
+poetry run focus-scrub historical_data/ demo_data/ \
+  --dataset CostAndUsage \
+  --date-shift-days 365 \
+  --dates-only
+```
+
 ### Complete Example
 
 ```bash

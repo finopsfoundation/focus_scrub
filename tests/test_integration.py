@@ -337,3 +337,92 @@ class TestIntegration:
         assert "environment" not in result_tags_scrub  # Keys scrambled
         assert "owner" not in result_tags_scrub
         assert "production" not in result_tags_scrub.values()  # Values also scrambled
+
+    def test_dates_only_mode(self) -> None:
+        """Test that dates_only mode only shifts dates and leaves other data unchanged."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingAccountName": ["Company A"],
+                "SubAccountId": ["222222222222"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+                "BillingPeriodEnd": ["2024-01-31T23:59:59Z"],
+                "Tags": ['{"environment":"production"}'],
+            }
+        )
+
+        # With dates_only=True, only date columns should be processed
+        config = HandlerConfig(date_shift_days=30, dates_only=True)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account IDs should be unchanged
+        assert result["BillingAccountId"][0] == "111111111111"
+        assert result["SubAccountId"][0] == "222222222222"
+
+        # Account names should be unchanged
+        assert result["BillingAccountName"][0] == "Company A"
+
+        # Tags should be unchanged
+        assert result["Tags"][0] == '{"environment":"production"}'
+
+        # Dates should be shifted
+        assert result["BillingPeriodStart"][0] != "2024-01-01T00:00:00Z"
+        assert result["BillingPeriodEnd"][0] != "2024-01-31T23:59:59Z"
+
+        # Verify the date shift is correct (30 days)
+        original_start = pd.to_datetime("2024-01-01T00:00:00Z")
+        shifted_start = pd.to_datetime(result["BillingPeriodStart"][0])
+        assert (shifted_start - original_start).days == 30
+
+    def test_dates_only_with_no_date_shift(self) -> None:
+        """Test that dates_only with no shift just passes through dates."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+            }
+        )
+
+        # dates_only=True but date_shift_days=0
+        config = HandlerConfig(date_shift_days=0, dates_only=True)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account ID should be unchanged (no handler applied)
+        assert result["BillingAccountId"][0] == "111111111111"
+
+        # Date should be unchanged (no shift), though format may differ
+        original_date = pd.to_datetime("2024-01-01T00:00:00Z")
+        result_date = pd.to_datetime(result["BillingPeriodStart"][0])
+        assert original_date == result_date  # Same moment in time
+
+    def test_dates_only_false_scrubs_everything(self) -> None:
+        """Test that dates_only=False (default) applies all handlers."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingAccountName": ["Company A"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+            }
+        )
+
+        # Default behavior: scrub everything
+        config = HandlerConfig(date_shift_days=30, dates_only=False)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account IDs should be scrubbed
+        assert result["BillingAccountId"][0] != "111111111111"
+
+        # Names should be scrubbed
+        assert result["BillingAccountName"][0] != "Company A"
+
+        # Dates should be shifted
+        assert result["BillingPeriodStart"][0] != "2024-01-01T00:00:00Z"
