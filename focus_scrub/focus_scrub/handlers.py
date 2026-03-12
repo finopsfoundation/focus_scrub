@@ -30,8 +30,13 @@ class GeneratorMappingHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         normalized = str(value)
         if normalized not in self.value_map:
@@ -55,8 +60,13 @@ class DateReformatHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         parsed = pd.to_datetime(value, errors="coerce")
         if pd.isna(parsed):
@@ -110,8 +120,13 @@ class AccountIdHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
         replacement = self._scrub_value(original)
@@ -180,8 +195,13 @@ class StellarNameHandler:
         self._collector = collector
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
         replacement = self.mapping_engine.map_name(original)
@@ -453,8 +473,13 @@ class ResourceIdHandler:
         return f"{ocid_prefix}.{scrambled_resource_type}.{realm}.{region}.{scrambled_unique_id}"
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
 
         original = str(value).strip()
 
@@ -499,6 +524,7 @@ class TagsHandler:
     """
 
     mapping_engine: MappingEngine
+    scrub_tag_keys: bool = False
     _char_map: dict[str, str] = field(default_factory=dict, init=False, repr=False)
     _column_name: str = field(default="", init=False, repr=False)
     _collector: MappingCollector | None = field(default=None, init=False, repr=False)
@@ -531,12 +557,49 @@ class TagsHandler:
         return "".join(self._get_char_mapping(c) for c in value)
 
     def scrub(self, value: object) -> object:
-        if pd.isna(value):
-            return value
+        # Handle scalar NA values
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            # Non-scalar or incompatible type, continue processing
+            pass
+
+        # Handle actual list objects (AWS parquet format)
+        if isinstance(value, list):
+            if not value:  # Empty list
+                return value
+            # Scramble values and optionally keys
+            if self.scrub_tag_keys:
+                scrubbed_list = [
+                    (self._scramble_string(key), self._scramble_string(val)) for key, val in value
+                ]
+            else:
+                scrubbed_list = [(key, self._scramble_string(val)) for key, val in value]
+            if self._collector is not None:
+                self._collector.record(self._column_name, str(value), str(scrubbed_list))
+            return scrubbed_list
+
+        # Handle dict objects (less common but possible)
+        if isinstance(value, dict):
+            if not value:  # Empty dict
+                return value
+            if self.scrub_tag_keys:
+                scrubbed_dict = {
+                    self._scramble_string(key): self._scramble_string(val) if val else val
+                    for key, val in value.items()
+                }
+            else:
+                scrubbed_dict = {
+                    key: self._scramble_string(val) if val else val for key, val in value.items()
+                }
+            if self._collector is not None:
+                self._collector.record(self._column_name, str(value), str(scrubbed_dict))
+            return scrubbed_dict
 
         original = str(value).strip()
 
-        # Handle empty lists/dicts
+        # Handle empty lists/dicts as strings
         if original in ("[]", "{}", ""):
             return value
 
@@ -545,23 +608,37 @@ class TagsHandler:
         import json
 
         try:
-            # AWS format: list of tuples (comes in as string representation from parquet)
+            # AWS format: list of tuples (comes in as string representation)
             if original.startswith("["):
                 tags_list = ast.literal_eval(original)
                 if isinstance(tags_list, list):
-                    # Scramble values but keep keys
-                    scrubbed_list = [(key, self._scramble_string(val)) for key, val in tags_list]
+                    # Scramble values and optionally keys
+                    if self.scrub_tag_keys:
+                        scrubbed_list = [
+                            (self._scramble_string(key), self._scramble_string(val))
+                            for key, val in tags_list
+                        ]
+                    else:
+                        scrubbed_list = [
+                            (key, self._scramble_string(val)) for key, val in tags_list
+                        ]
                     replacement = str(scrubbed_list)
                 else:
                     replacement = original
             # Azure/OCI format: JSON string
             elif original.startswith("{"):
                 tags_dict = json.loads(original)
-                # Scramble values but keep keys
-                scrubbed_dict = {
-                    key: self._scramble_string(val) if val else val
-                    for key, val in tags_dict.items()
-                }
+                # Scramble values and optionally keys
+                if self.scrub_tag_keys:
+                    scrubbed_dict = {
+                        self._scramble_string(key): self._scramble_string(val) if val else val
+                        for key, val in tags_dict.items()
+                    }
+                else:
+                    scrubbed_dict = {
+                        key: self._scramble_string(val) if val else val
+                        for key, val in tags_dict.items()
+                    }
                 replacement = json.dumps(scrubbed_dict, separators=(",", ":"))
             else:
                 # Unknown format, pass through
@@ -584,6 +661,8 @@ class TagsHandler:
 @dataclass(frozen=True)
 class HandlerConfig:
     date_shift_days: int = 0
+    scrub_tag_keys: bool = False
+    dates_only: bool = False
 
 
 HandlerFactory = Callable[[HandlerConfig, MappingEngine], ColumnHandler]
@@ -612,7 +691,7 @@ def _build_resource_id_handler(config: HandlerConfig, engine: MappingEngine) -> 
 
 
 def _build_tags_handler(config: HandlerConfig, engine: MappingEngine) -> ColumnHandler:
-    return TagsHandler(mapping_engine=engine)
+    return TagsHandler(mapping_engine=engine, scrub_tag_keys=config.scrub_tag_keys)
 
 
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
@@ -680,6 +759,10 @@ def get_column_handlers_for_dataset(
         mapping_engine = MappingEngine()
 
     for column_name, handler_name in column_to_handler_name.items():
+        # If dates_only mode, skip non-date handlers
+        if config.dates_only and handler_name != "DateReformat":
+            continue
+
         if handler_name not in HANDLER_FACTORIES:
             raise ValueError(
                 f"Dataset '{dataset_name}' references unknown handler "

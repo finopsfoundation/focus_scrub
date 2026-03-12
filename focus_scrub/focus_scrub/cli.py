@@ -69,6 +69,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Remove custom columns from the output.",
     )
+    parser.add_argument(
+        "--drop-columns",
+        nargs="*",
+        default=["x_Discounts"],
+        metavar="COLUMN",
+        help="Specific column names to drop from the output (default: x_Discounts). Pass empty list to keep all columns.",
+    )
+    parser.add_argument(
+        "--scrub-tag-keys",
+        action="store_true",
+        help="Scrub tag keys in addition to tag values (default: False, only scrubs values).",
+    )
+    parser.add_argument(
+        "--dates-only",
+        action="store_true",
+        help="Only shift dates, leave all other data unchanged. Useful for re-dating datasets without scrubbing.",
+    )
+    parser.add_argument(
+        "--sql-table-name",
+        type=str,
+        default=None,
+        help="Custom table name for SQL output. If not provided, derives from filename.",
+    )
     return parser
 
 
@@ -84,13 +107,19 @@ def main() -> int:
     export_mappings: Path | None = args.export_mappings
     load_mappings: Path | None = args.load_mappings
     remove_custom_columns: bool = args.remove_custom_columns
+    drop_columns: list[str] = args.drop_columns
+    scrub_tag_keys: bool = args.scrub_tag_keys
+    dates_only: bool = args.dates_only
+    sql_table_name: str | None = args.sql_table_name
 
     files = discover_focus_files(input_path)
     if not files:
         parser.error("No supported input files found (.csv, .csv.gz, .parquet).")
 
     collector = MappingCollector() if export_mappings is not None else None
-    handler_config = HandlerConfig(date_shift_days=date_shift_days)
+    handler_config = HandlerConfig(
+        date_shift_days=date_shift_days, scrub_tag_keys=scrub_tag_keys, dates_only=dates_only
+    )
 
     # Load existing mappings if provided
     mapping_engine = None
@@ -107,7 +136,9 @@ def main() -> int:
         dataset, config=handler_config, collector=collector, mapping_engine=mapping_engine
     )
     scrub = DataFrameScrub(
-        column_handlers=column_handlers, remove_custom_columns=remove_custom_columns
+        column_handlers=column_handlers,
+        remove_custom_columns=remove_custom_columns,
+        drop_columns=drop_columns,
     )
 
     for input_file in files:
@@ -119,7 +150,7 @@ def main() -> int:
             output_root=output_path,
             output_format=output_format,
         )
-        write_focus_file(scrubbed, destination, output_format)
+        write_focus_file(scrubbed, destination, output_format, sql_table_name=sql_table_name)
         print(f"Processed: {input_file} -> {destination}")
 
     print(f"Done. Processed {len(files)} file(s) for dataset '{dataset}'.")

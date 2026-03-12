@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 from focus_scrub.handlers import HandlerConfig, get_column_handlers_for_dataset
 from focus_scrub.mapping import MappingCollector
 from focus_scrub.scrub import DataFrameScrub
@@ -145,3 +144,285 @@ class TestIntegration:
 
         # Verify that the same account ID gets the same mapping
         assert result1["BillingAccountId"][0] == result2["BillingAccountId"][0]
+
+    def test_drop_columns_defaults_to_x_discounts(self) -> None:
+        """Test that x_Discounts is dropped by default."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        # Not specifying drop_columns - should use default
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is dropped by default
+        assert "x_Discounts" not in result.columns
+        # Verify other custom columns remain
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_columns_can_be_overridden_to_empty(self) -> None:
+        """Test that drop_columns can be set to empty list to keep x_Discounts."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        # Explicitly pass empty list to keep all columns
+        scrub = DataFrameScrub(column_handlers=column_handlers, drop_columns=[])
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is kept when explicitly set to empty
+        assert "x_Discounts" in result.columns
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_specific_columns(self) -> None:
+        """Test dropping specific columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers, drop_columns=["x_Discounts"])
+
+        result = scrub.scrub(df)
+
+        # Verify x_Discounts is dropped but x_CustomField remains
+        assert "x_Discounts" not in result.columns
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_multiple_columns(self) -> None:
+        """Test dropping multiple specific columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "x_AnotherField": ["another1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            drop_columns=["x_Discounts", "x_AnotherField"],
+        )
+
+        result = scrub.scrub(df)
+
+        # Verify specified columns are dropped
+        assert "x_Discounts" not in result.columns
+        assert "x_AnotherField" not in result.columns
+        # Verify other columns remain
+        assert "x_CustomField" in result.columns
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_columns_with_remove_custom_columns(self) -> None:
+        """Test that drop_columns works alongside remove_custom_columns."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "x_Discounts": ["discount1"],
+                "x_CustomField": ["custom1"],
+                "oci_tenancyId": ["tenancy1"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            remove_custom_columns=True,
+            drop_columns=[
+                "x_Discounts"
+            ],  # This should be redundant since remove_custom_columns removes it anyway
+        )
+
+        result = scrub.scrub(df)
+
+        # Verify all custom columns are removed
+        assert "x_Discounts" not in result.columns
+        assert "x_CustomField" not in result.columns
+        assert "oci_tenancyId" not in result.columns
+        # Verify standard columns remain
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+
+    def test_drop_nonexistent_column(self) -> None:
+        """Test that dropping a non-existent column doesn't cause errors."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "Tags": ["tag1"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(
+            column_handlers=column_handlers,
+            drop_columns=["x_NonExistent", "x_AlsoNotThere"],
+        )
+
+        result = scrub.scrub(df)
+
+        # Should complete without error
+        assert "BillingAccountId" in result.columns
+        assert "Tags" in result.columns
+        assert len(result.columns) == 2
+
+    def test_scrub_tag_keys_config_option(self) -> None:
+        """Test that scrub_tag_keys config option works through the handler."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "Tags": ['{"environment":"production","owner":"team-alpha"}'],
+            }
+        )
+
+        # Default behavior: preserve keys
+        config_default = HandlerConfig(date_shift_days=0, scrub_tag_keys=False)
+        column_handlers_default, _ = get_column_handlers_for_dataset(
+            "CostAndUsage", config=config_default
+        )
+        scrub_default = DataFrameScrub(column_handlers=column_handlers_default)
+        result_default = scrub_default.scrub(df)
+
+        import json
+
+        result_tags_default = json.loads(result_default["Tags"][0])
+        assert "environment" in result_tags_default  # Keys preserved
+        assert "owner" in result_tags_default
+        assert result_tags_default["environment"] != "production"  # Values scrambled
+
+        # With scrub_tag_keys: scramble keys too
+        config_scrub = HandlerConfig(date_shift_days=0, scrub_tag_keys=True)
+        column_handlers_scrub, _ = get_column_handlers_for_dataset(
+            "CostAndUsage", config=config_scrub
+        )
+        scrub_keys = DataFrameScrub(column_handlers=column_handlers_scrub)
+        result_scrub = scrub_keys.scrub(df)
+
+        result_tags_scrub = json.loads(result_scrub["Tags"][0])
+        assert "environment" not in result_tags_scrub  # Keys scrambled
+        assert "owner" not in result_tags_scrub
+        assert "production" not in result_tags_scrub.values()  # Values also scrambled
+
+    def test_dates_only_mode(self) -> None:
+        """Test that dates_only mode only shifts dates and leaves other data unchanged."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingAccountName": ["Company A"],
+                "SubAccountId": ["222222222222"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+                "BillingPeriodEnd": ["2024-01-31T23:59:59Z"],
+                "Tags": ['{"environment":"production"}'],
+            }
+        )
+
+        # With dates_only=True, only date columns should be processed
+        config = HandlerConfig(date_shift_days=30, dates_only=True)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account IDs should be unchanged
+        assert result["BillingAccountId"][0] == "111111111111"
+        assert result["SubAccountId"][0] == "222222222222"
+
+        # Account names should be unchanged
+        assert result["BillingAccountName"][0] == "Company A"
+
+        # Tags should be unchanged
+        assert result["Tags"][0] == '{"environment":"production"}'
+
+        # Dates should be shifted
+        assert result["BillingPeriodStart"][0] != "2024-01-01T00:00:00Z"
+        assert result["BillingPeriodEnd"][0] != "2024-01-31T23:59:59Z"
+
+        # Verify the date shift is correct (30 days)
+        original_start = pd.to_datetime("2024-01-01T00:00:00Z")
+        shifted_start = pd.to_datetime(result["BillingPeriodStart"][0])
+        assert (shifted_start - original_start).days == 30
+
+    def test_dates_only_with_no_date_shift(self) -> None:
+        """Test that dates_only with no shift just passes through dates."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+            }
+        )
+
+        # dates_only=True but date_shift_days=0
+        config = HandlerConfig(date_shift_days=0, dates_only=True)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account ID should be unchanged (no handler applied)
+        assert result["BillingAccountId"][0] == "111111111111"
+
+        # Date should be unchanged (no shift), though format may differ
+        original_date = pd.to_datetime("2024-01-01T00:00:00Z")
+        result_date = pd.to_datetime(result["BillingPeriodStart"][0])
+        assert original_date == result_date  # Same moment in time
+
+    def test_dates_only_false_scrubs_everything(self) -> None:
+        """Test that dates_only=False (default) applies all handlers."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["111111111111"],
+                "BillingAccountName": ["Company A"],
+                "BillingPeriodStart": ["2024-01-01T00:00:00Z"],
+            }
+        )
+
+        # Default behavior: scrub everything
+        config = HandlerConfig(date_shift_days=30, dates_only=False)
+        column_handlers, _ = get_column_handlers_for_dataset("CostAndUsage", config=config)
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        # Account IDs should be scrubbed
+        assert result["BillingAccountId"][0] != "111111111111"
+
+        # Names should be scrubbed
+        assert result["BillingAccountName"][0] != "Company A"
+
+        # Dates should be shifted
+        assert result["BillingPeriodStart"][0] != "2024-01-01T00:00:00Z"

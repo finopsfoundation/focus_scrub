@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 from focus_scrub.handlers import (
     AccountIdHandler,
     CommitmentDiscountIdHandler,
@@ -498,3 +497,128 @@ class TestTagsHandler:
         assert "Tags" in mappings
         assert original in dict(mappings["Tags"])
         assert dict(mappings["Tags"])[original] == result
+
+    def test_scrub_tag_keys_aws_format(self, mapping_engine: MappingEngine) -> None:
+        """Test that tag keys are scrambled when scrub_tag_keys=True (AWS format)."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=True)
+
+        tags = "[('environment', 'production'), ('owner', 'team-alpha')]"
+        result = handler.scrub(tags)
+
+        import ast
+
+        result_list = ast.literal_eval(result)
+
+        # Keys should be scrambled
+        keys = [key for key, _ in result_list]
+        assert "environment" not in keys
+        assert "owner" not in keys
+
+        # Values should be scrambled
+        values = [val for _, val in result_list]
+        assert "production" not in values
+        assert "team-alpha" not in values
+
+        # Should still be valid list of tuples
+        assert len(result_list) == 2
+        assert all(isinstance(item, tuple) and len(item) == 2 for item in result_list)
+
+    def test_scrub_tag_keys_json_format(self, mapping_engine: MappingEngine) -> None:
+        """Test that tag keys are scrambled when scrub_tag_keys=True (JSON format)."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=True)
+
+        tags = '{"environment":"production","owner":"team-alpha"}'
+        result = handler.scrub(tags)
+
+        import json
+
+        result_dict = json.loads(result)
+
+        # Keys should be scrambled (not original keys)
+        assert "environment" not in result_dict
+        assert "owner" not in result_dict
+
+        # Values should be scrambled
+        assert "production" not in result_dict.values()
+        assert "team-alpha" not in result_dict.values()
+
+        # Should still be valid dict with same number of entries
+        assert len(result_dict) == 2
+
+    def test_scrub_tag_keys_preserves_keys_by_default(self, mapping_engine: MappingEngine) -> None:
+        """Test that keys are preserved when scrub_tag_keys=False (default)."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=False)
+
+        tags = '{"environment":"production","owner":"team-alpha"}'
+        result = handler.scrub(tags)
+
+        import json
+
+        result_dict = json.loads(result)
+
+        # Keys should be preserved (default behavior)
+        assert "environment" in result_dict
+        assert "owner" in result_dict
+
+        # Values should be scrambled
+        assert result_dict["environment"] != "production"
+        assert result_dict["owner"] != "team-alpha"
+
+    def test_scrub_tag_keys_with_native_list(self, mapping_engine: MappingEngine) -> None:
+        """Test that native list objects have keys scrambled when scrub_tag_keys=True."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=True)
+
+        # Native Python list (from parquet)
+        tags = [("environment", "production"), ("owner", "team-alpha")]
+        result = handler.scrub(tags)
+
+        # Keys should be scrambled
+        keys = [key for key, _ in result]
+        assert "environment" not in keys
+        assert "owner" not in keys
+
+        # Values should be scrambled
+        values = [val for _, val in result]
+        assert "production" not in values
+        assert "team-alpha" not in values
+
+    def test_scrub_tag_keys_with_native_dict(self, mapping_engine: MappingEngine) -> None:
+        """Test that native dict objects have keys scrambled when scrub_tag_keys=True."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=True)
+
+        # Native Python dict
+        tags = {"environment": "production", "owner": "team-alpha"}
+        result = handler.scrub(tags)
+
+        # Keys should be scrambled
+        assert "environment" not in result
+        assert "owner" not in result
+
+        # Values should be scrambled
+        assert "production" not in result.values()
+        assert "team-alpha" not in result.values()
+
+    def test_scrub_tag_keys_consistency(self, mapping_engine: MappingEngine) -> None:
+        """Test that same keys scramble consistently when scrub_tag_keys=True."""
+        handler = TagsHandler(mapping_engine=mapping_engine, scrub_tag_keys=True)
+
+        tags1 = '{"env":"prod","team":"alpha"}'
+        tags2 = '{"env":"staging","team":"beta"}'
+
+        result1 = handler.scrub(tags1)
+        result2 = handler.scrub(tags2)
+
+        import json
+
+        dict1 = json.loads(result1)
+        dict2 = json.loads(result2)
+
+        # Same key should scramble to same value
+        keys1 = list(dict1.keys())
+        keys2 = list(dict2.keys())
+
+        # "env"  and "team" should map to the same scrambled keys in both
+        # We can verify by checking the scrambled keys match up by sorting
+        keys1.sort()
+        keys2.sort()
+        assert keys1 == keys2, "Same original keys should produce same scrambled keys"

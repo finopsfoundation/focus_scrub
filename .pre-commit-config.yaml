@@ -9,11 +9,10 @@ repos:
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.1
+    rev: v0.15.2
     hooks:
       # Run the linter
       - id: ruff
-        args: [--fix]
       # Run the formatter
       - id: ruff-format
 

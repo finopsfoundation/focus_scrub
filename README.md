@@ -11,6 +11,22 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
 - **Name Anonymization**: Replaces account names with stellar-themed generated names
 - **Date Shifting**: Shifts date/datetime values by a configurable number of days
 - **Commitment Discount IDs**: Intelligently scrubs complex IDs containing embedded account numbers and UUIDs
+- **Tag Scrubbing**: Scrambles tag values while preserving keys by default; optionally scrambles keys as well
+- **Resource ID Scrubbing**: Handles AWS ARNs, Azure Resource IDs, and OCI OCIDs with intelligent pattern-based scrambling
+
+#### What is NOT Scrubbed
+
+**Metric columns (costs, quantities, usage amounts) are intentionally left unchanged.** This is a deliberate design decision for the following reasons:
+
+1. **Interdependency Complexity**: Metric columns are mathematically related (e.g., `BilledCost = ConsumedQuantity × UnitPrice`). Adjusting one metric would require proportional adjustments to maintain consistency, which is extremely complex across all FOCUS metric relationships.
+
+2. **Reversibility Risk**: Any systematic scaling of metrics could potentially be reversed by correlating the scrubbed dataset with publicly available pricing data, providing a false sense of security without actual data protection.
+
+3. **Data Integrity**: Altering metrics would break the mathematical consistency of the dataset, making it unsuitable for realistic testing, validation, or development scenarios where accurate cost calculations are required.
+
+4. **Limited PII Value**: Unlike account IDs and names, aggregate cost and usage metrics typically don't constitute personally identifiable information on their own.
+
+**Recommendation**: If metric values are sensitive in your use case, consider using a representative subset of your data, applying additional manual obfuscation, or generating synthetic data with realistic distributions rather than relying on automated metric scrubbing.
 
 ### Mapping Engine
 - **Component-Level Mappings**: Centralized mapping engine ensures consistency across all columns
@@ -29,7 +45,7 @@ A Python command-line tool for scrubbing sensitive data from FOCUS billing files
 
 ### File Format Support
 - **Input formats**: `.csv`, `.csv.gz`, `.parquet`
-- **Output formats**: `csv-gzip`, `parquet`
+- **Output formats**: `csv-gzip`, `parquet`, `sql`
 - Process single files or entire directories
 - Preserves directory structure in output
 
@@ -116,6 +132,88 @@ poetry run focus-scrub input/ output/ \
   --output-format csv-gzip
 ```
 
+Available formats:
+- `parquet` (default): Apache Parquet columnar format
+- `csv-gzip`: Compressed CSV files
+- `sql`: SQL INSERT statements for database loading
+
+#### SQL Output Format
+
+The SQL output format generates CREATE TABLE DDL and bulk INSERT statements optimized for database loading:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --output-format sql
+```
+
+**Features:**
+- Generates CREATE TABLE IF NOT EXISTS statement with inferred column types
+- Adds auto-incrementing `id` column as primary key
+- Generates bulk INSERT statements (1000 rows per batch)
+- Automatically derives table name from filename (sanitizes hyphens, spaces, periods → underscores)
+- Properly escapes single quotes in string values
+- Handles NULL values correctly
+- Includes row count in header comments
+
+**Example output:**
+```sql
+-- FOCUS Scrubbed Data
+-- Table: focus_data
+-- Rows: 2500
+
+CREATE TABLE IF NOT EXISTS focus_data (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  BillingAccountId TEXT,
+  BillingAccountName TEXT,
+  Cost DOUBLE PRECISION
+);
+
+INSERT INTO focus_data (BillingAccountId, BillingAccountName, Cost)
+VALUES
+  ('123456789012', 'Nebula Alpha', 100.50),
+  ('987654321098', 'Stellar Beta', 250.75),
+  ...;
+
+INSERT INTO focus_data (BillingAccountId, BillingAccountName, Cost)
+VALUES
+  ...
+```
+
+**Column type mapping:**
+- Integer columns → `BIGINT`
+- Float/Double columns → `DOUBLE PRECISION`
+- Boolean columns → `BOOLEAN`
+- DateTime columns → `TIMESTAMP`
+- Date columns → `DATE`
+- All other types → `TEXT`
+
+**Use case:** Ideal for loading scrubbed data directly into databases (PostgreSQL, MySQL, SQLite, etc.) using standard SQL import tools. The CREATE TABLE statement ensures the table exists before inserting data, and the auto-incrementing primary key provides a unique identifier for each row.
+
+##### Custom Table Name
+
+By default, the SQL table name is derived from the input filename. You can specify a custom table name using the `--sql-table-name` option:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --output-format sql \
+  --sql-table-name my_billing_data
+```
+
+This will generate SQL with your custom table name:
+```sql
+CREATE TABLE IF NOT EXISTS my_billing_data (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ...
+);
+
+INSERT INTO my_billing_data (...)
+VALUES ...;
+```
+
+**Note:** The custom table name is still sanitized (hyphens, spaces, periods → underscores) to ensure SQL compatibility.
+
 ### Remove Custom Columns
 
 Remove custom columns (starting with `x_` or `oci_`) from the output:
@@ -126,6 +224,87 @@ poetry run focus-scrub input/ output/ \
 ```
 
 > **Note**: The FOCUS spec states that custom columns should start with `x_`, but OCI uses `oci_` prefix. Both patterns are recognized and removed when this option is enabled.
+
+### Drop Specific Columns
+
+By default, the `x_Discounts` column is automatically dropped from the output. This is a known data generator custom column that is commonly removed.
+
+To keep `x_Discounts`, explicitly pass an empty list:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns
+```
+
+To drop additional specific columns:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns x_Discounts x_CustomField x_AnotherField
+```
+
+This is useful when you want to remove specific custom columns but keep others. For example, to drop only `x_CustomField` while keeping `x_Discounts`:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --drop-columns x_CustomField
+```
+
+You can combine `--drop-columns` with `--remove-custom-columns`, though the latter will remove all custom columns anyway:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --remove-custom-columns \
+  --drop-columns x_Discounts  # Redundant but harmless
+```
+
+### Scrub Tag Keys
+
+By default, the Tags column handler preserves tag keys and only scrubs the values. To also scrub the tag keys:
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --scrub-tag-keys
+```
+
+**Default behavior (preserve keys):**
+```
+Input:  {"environment":"production","owner":"team-alpha"}
+Output: {"environment":"qspcvdujpo","owner":"ufbn-bmqib"}
+```
+
+**With --scrub-tag-keys (scrub both keys and values):**
+```
+Input:  {"environment":"production","owner":"team-alpha"}
+Output: {"fowjsponfou":"qspcvdujpo","pxofs":"ufbn-bmqib"}
+```
+
+> **Note**: When `--scrub-tag-keys` is enabled, the same key will consistently map to the same scrambled key across all tags and all rows, ensuring referential integrity is maintained.
+
+### Dates Only Mode
+
+To only shift dates without scrubbing any other sensitive data, use the `--dates-only` option. This is useful for re-dating FOCUS datasets for testing or analysis while preserving the original data:
+
+```bash
+poetry run focus-scrub input/ output/ \
+  --dataset CostAndUsage \
+  --date-shift-days 30 \
+  --dates-only
+```
+
+**What happens:**
+- Date columns are shifted by the specified number of days
+- All other columns (account IDs, names, tags, etc.) remain unchanged
+- Useful for time-based testing without data scrubbing
+
+**Example use case:**
+```bash
+# Re-date a dataset to current month for demo purposes
+poetry run focus-scrub historical_data/ demo_data/ \
+  --dataset CostAndUsage \
+  --date-shift-days 365 \
+  --dates-only
+```
 
 ### Complete Example
 
@@ -210,3 +389,81 @@ CommitmentDiscountId: arn:aws:ec2:us-east-1:752426551655:reserved-instances/c741
 ```
 
 Note: The account ID `658755425446` consistently maps to `752426551655` in both the `SubAccountId` column and within the `CommitmentDiscountId` ARN.
+
+## Development
+
+### Running Tests
+
+Run the test suite:
+```bash
+make test
+# or
+poetry run pytest tests/ -v
+```
+
+### Code Coverage
+
+Run tests with coverage report:
+```bash
+make coverage
+```
+
+This will run all tests and display a coverage report in the terminal showing:
+- Overall coverage percentage
+- Coverage by file
+- Missing line numbers
+
+Generate an HTML coverage report:
+```bash
+make coverage-html
+```
+
+This creates an interactive HTML report in `htmlcov/index.html` that you can open in your browser to see detailed line-by-line coverage information.
+
+**Current coverage:** ~89%
+
+**Coverage requirement:** The test suite enforces a minimum coverage threshold of **80%**. Tests will fail if coverage drops below this threshold, both locally and in CI/CD pipelines. This ensures code quality is maintained as the project evolves.
+
+### Code Quality
+
+Run all code quality checks:
+```bash
+make check
+```
+
+This runs:
+- Linting (ruff)
+- Format checking (ruff format)
+- Type checking (mypy)
+- Tests with coverage
+
+Format code:
+```bash
+make format
+```
+
+### Pre-commit Hooks
+
+Install pre-commit hooks to automatically run checks before each commit:
+```bash
+make pre-commit-install
+```
+
+Or run manually:
+```bash
+make pre-commit-run
+```
+
+### Clean Up
+
+Remove generated files and caches:
+```bash
+make clean
+```
+
+This removes:
+- Python cache files (`__pycache__`, `.pyc`)
+- Test cache (`.pytest_cache`)
+- Type checking cache (`.mypy_cache`)
+- Linter cache (`.ruff_cache`)
+- Coverage files (`.coverage`, `coverage.xml`, `htmlcov/`)
