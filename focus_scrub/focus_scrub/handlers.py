@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -653,6 +654,40 @@ class TagsHandler:
         return replacement
 
 
+@dataclass
+class UnmappedScrambleStringHandler:
+    """Deterministically scramble string character order without storing mappings."""
+
+    def attach_collector(self, column_name: str, collector: MappingCollector) -> None:
+        # Intentionally a no-op: this handler should not emit mapping records.
+        return
+
+    def scrub(self, value: object) -> object:
+        try:
+            if pd.isna(value):
+                return value
+        except (ValueError, TypeError):
+            pass
+
+        original = str(value)
+        if len(original) <= 1:
+            return original
+
+        indices = list(range(len(original)))
+        sorted_indices = sorted(
+            indices,
+            key=lambda idx: hashlib.sha256(f"{original}|{idx}".encode()).digest(),
+        )
+        scrambled = "".join(original[idx] for idx in sorted_indices)
+
+        if scrambled == original:
+            rotated = original[1:] + original[0]
+            if rotated != original:
+                return rotated
+
+        return scrambled
+
+
 # ---------------------------------------------------------------------------
 # Handler config + factories
 # ---------------------------------------------------------------------------
@@ -694,6 +729,12 @@ def _build_tags_handler(config: HandlerConfig, engine: MappingEngine) -> ColumnH
     return TagsHandler(mapping_engine=engine, scrub_tag_keys=config.scrub_tag_keys)
 
 
+def _build_unmapped_scamble_string_handler(
+    config: HandlerConfig, engine: MappingEngine
+) -> ColumnHandler:
+    return UnmappedScrambleStringHandler()
+
+
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
     "DateReformat": _build_date_reformat_handler,
     "AccountId": _build_account_id_handler,
@@ -701,6 +742,8 @@ HANDLER_FACTORIES: dict[str, HandlerFactory] = {
     "CommitmentDiscountId": _build_commitment_discount_id_handler,
     "ResourceId": _build_resource_id_handler,
     "Tags": _build_tags_handler,
+    "unmapped_scamble_string": _build_unmapped_scamble_string_handler,
+    "UnmappedScrambleString": _build_unmapped_scamble_string_handler,
 }
 
 # Dataset-specific column mapping.
@@ -719,6 +762,15 @@ DATASET_COLUMN_HANDLER_NAMES: dict[str, dict[str, str]] = {
         "CommitmentDiscountId": "CommitmentDiscountId",
         "ResourceId": "ResourceId",
         "Tags": "Tags",
+        "oci_ReferenceNumber": "unmapped_scamble_string",
+        "oci_CompartmentId": "ResourceId",
+        "oci_CompartmentName": "StellarName",
+        "x_BillingAccountName": "StellarName",
+        "x_BillingAccountId": "AccountId",
+        "x_BillingProfileId": "AccountId",
+        "x_CustomerName": "StellarName",
+        "x_InvoiceSectionId": "AccountId",
+        "x_ResourceGroupName": "StellarName",
     },
     "ContractCommitment": {
         "ContractCommitmentPeriodStart": "DateReformat",

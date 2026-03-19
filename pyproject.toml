@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "focus-scrub"
-version = "0.1.0"
+version = "0.1.1"
 description = "Command-line FOCUS file scrub tool with pluggable per-column handlers."
 authors = []
 readme = "README.md"

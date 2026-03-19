@@ -35,7 +35,8 @@ def read_focus_file(path: Path) -> pd.DataFrame:
         return pd.read_parquet(path)
 
     if suffixes[-2:] == [".csv", ".gz"] or path.suffix == ".csv":
-        return pd.read_csv(path)
+        # Avoid mixed-type chunk inference warnings on large FOCUS CSV files.
+        return pd.read_csv(path, low_memory=False)
 
     raise ValueError(f"Unsupported input format: {path}")
 

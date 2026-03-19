@@ -9,6 +9,7 @@ from focus_scrub.handlers import (
     ResourceIdHandler,
     StellarNameHandler,
     TagsHandler,
+    UnmappedScrambleStringHandler,
 )
 from focus_scrub.mapping import MappingCollector, MappingEngine
 
@@ -622,3 +623,39 @@ class TestTagsHandler:
         keys1.sort()
         keys2.sort()
         assert keys1 == keys2, "Same original keys should produce same scrambled keys"
+
+
+class TestUnmappedScrambleStringHandler:
+    """Test the UnmappedScrambleStringHandler."""
+
+    def test_scrambles_character_order(self) -> None:
+        """Test that values are scrambled by reordering characters."""
+        handler = UnmappedScrambleStringHandler()
+
+        original = "ABCD-1234"
+        result = handler.scrub(original)
+
+        assert result != original
+        assert len(result) == len(original)
+        assert sorted(result) == sorted(original)
+
+    def test_deterministic_without_mapping_records(
+        self, mapping_collector: MappingCollector
+    ) -> None:
+        """Test deterministic output and no mapping collector side effects."""
+        handler = UnmappedScrambleStringHandler()
+        handler.attach_collector("oci_ReferenceNumber", mapping_collector)
+
+        original = "ref-number-0001"
+        result1 = handler.scrub(original)
+        result2 = handler.scrub(original)
+
+        assert result1 == result2
+        assert mapping_collector.to_dict() == {}
+
+    def test_na_values_passed_through(self) -> None:
+        """Test that NA values are passed through unchanged."""
+        handler = UnmappedScrambleStringHandler()
+
+        assert pd.isna(handler.scrub(pd.NA))
+        assert pd.isna(handler.scrub(None))

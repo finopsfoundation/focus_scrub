@@ -11,6 +11,34 @@ from focus_scrub.scrub import DataFrameScrub
 class TestIntegration:
     """Integration tests for complete workflow."""
 
+    def test_oci_reference_number_scrambled_without_mapping_collection(self) -> None:
+        """Test oci_ReferenceNumber is scrambled but not recorded in mapping exports."""
+        df = pd.DataFrame(
+            {
+                "BillingAccountId": ["000011112222"],
+                "oci_ReferenceNumber": ["ABCD-1234-XYZ"],
+            }
+        )
+
+        config = HandlerConfig(date_shift_days=0)
+        collector = MappingCollector()
+        column_handlers, _ = get_column_handlers_for_dataset(
+            "CostAndUsage", config=config, collector=collector
+        )
+        scrub = DataFrameScrub(column_handlers=column_handlers)
+
+        result = scrub.scrub(df)
+
+        original = df["oci_ReferenceNumber"][0]
+        scrambled = result["oci_ReferenceNumber"][0]
+
+        assert scrambled != original
+        assert len(scrambled) == len(original)
+        assert sorted(scrambled) == sorted(original)
+
+        mappings = collector.to_dict()
+        assert "oci_ReferenceNumber" not in mappings
+
     def test_cost_and_usage_scrubbing(self) -> None:
         """Test scrubbing a CostAndUsage dataset."""
         # Create test data
