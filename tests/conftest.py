@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from focus_scrub.mapping import MappingCollector, MappingEngine
 
 

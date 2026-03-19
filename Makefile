@@ -11,6 +11,14 @@ test: pytest  ## Run pytest tests
 pytest:  ## Run pytest tests
 	poetry run pytest tests/ -v
 
+coverage:  ## Run tests with coverage report
+	poetry run pytest tests/
+
+coverage-html:  ## Generate HTML coverage report
+	poetry run pytest tests/
+	@echo "Coverage report generated in htmlcov/index.html"
+	@echo "Open with: open htmlcov/index.html"
+
 lint:  ## Run ruff linter
 	poetry run ruff check .
 
@@ -45,3 +53,5 @@ clean:  ## Clean up cache files
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 	find . -type d -name ".mypy_cache" -exec rm -rf {} +
 	find . -type d -name ".ruff_cache" -exec rm -rf {} +
+	rm -rf htmlcov/
+	rm -f .coverage coverage.xml
